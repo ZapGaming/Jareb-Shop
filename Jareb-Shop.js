@@ -1,34 +1,45 @@
 // ==UserScript==
-// @name         The Jareb Shop (Tampermonkey System)
-// @namespace    http://tampermonkey.net/
-// @version      1.24
-// @description  A plugin for Discord to earn "Jareb coins" with Tampermonkey-based persistence and custom badges. Now with a password-protected developer zone.
-// @author       Gemini
-// @match        https://discord.com/*
-// @grant        GM_addStyle
-// @grant        GM_getValue
-// @grant        GM_setValue
-// @grant        GM_xmlhttpRequest
+// @name        The Jareb Shop (Tampermonkey System)
+// @namespace   http://tampermonkey.net/
+// @version     1.49
+// @description A plugin for Discord to earn "Jareb coins" with Tampermonkey-based persistence and custom CSS theme support. This version fixes the minimalist layout's toggle button functionality.
+// @author      Gemini
+// @match       https://discord.com/*
+// @grant       GM_addStyle
+// @grant       GM_getValue
+// @grant       GM_setValue
+// @grant       GM_xmlhttpRequest
 // ==/UserScript==
 
 (function() {
     'use strict';
 
     // --- CONFIGURATION & DEFAULTS ---
-    const LOCAL_STORAGE_KEY = 'jarebShopState_v1_23';
-    const INVISIBLE_KEY = 'jareb-theme-crazy\u200B';
+    const LOCAL_STORAGE_KEY = 'jarebShopState_v1_49';
     const COINS_PER_STREAK = 10;
     const COINS_PER_MESSAGE_BASE = 1;
     const COINS_PER_50_CHARS = 1;
     const DEV_ZONE_PASSWORD = 'heykidwantahotdog';
+    const CUSTOM_THEME_STYLE_ID = 'jareb-custom-css-theme';
+    const MINIMALIST_THEME_STYLE_ID = 'jareb-minimalist-theme-styles';
+    const SIDEBAR_TOGGLE_BUTTON_ID = 'jareb-sidebar-toggle-button';
+    const MINIMALIST_CLASS = 'jareb-minimalist-active';
+
+    // Centralized data for shop items
+    const THEMES = {
+        'Custom CSS Theme': { cost: 500, description: "Unlocks the ability to apply any custom CSS theme from a URL to the entire Discord client.", type: 'theme' },
+        'Minimalist Layout': { cost: 100, description: "Hides the sidebars for a full-screen chat experience. Includes a toggle button to show them again.", type: 'theme' }
+    };
+    const ALL_SHOP_ITEMS = { ...THEMES };
 
     // --- STATE MANAGEMENT ---
     let jarebState = GM_getValue(LOCAL_STORAGE_KEY, {
         coins: 0,
         unlockedThemes: [],
-        unlockedBadges: [],
         dailyStreak: 0,
         lastLoginDate: null,
+        activeThemeUrl: null,
+        activeThemeName: null
     });
 
     /**
@@ -44,30 +55,19 @@
     function checkDailyStreak() {
         const today = new Date();
         today.setHours(0, 0, 0, 0); // Normalize to midnight for accurate comparison
-
         const lastLogin = jarebState.lastLoginDate ? new Date(jarebState.lastLoginDate) : null;
         const oneDay = 24 * 60 * 60 * 1000;
 
-        // If this is the first time, start the streak
-        if (!lastLogin) {
+        if (!lastLogin || today.getTime() > lastLogin.getTime() + oneDay) {
             jarebState.dailyStreak = 1;
             showToast('Welcome! Your daily streak has begun (Day 1).');
-        } else {
-            const timeDifference = today.getTime() - lastLogin.getTime();
-            // Check if login was yesterday
-            if (timeDifference > 0 && timeDifference <= oneDay) {
-                jarebState.dailyStreak++;
-                const bonusCoins = jarebState.dailyStreak * COINS_PER_STREAK;
-                jarebState.coins += bonusCoins;
-                showToast(`Daily streak! Day ${jarebState.dailyStreak}. You earned a bonus of ${bonusCoins} coins! Total: ${jarebState.coins}`);
-            } else if (timeDifference > oneDay) {
-                // Streak is broken
-                jarebState.dailyStreak = 1;
-                showToast('Your streak was broken. But you are back on track! (Day 1)');
-            } else {
-                // Logged in on the same day, do nothing.
-                return;
-            }
+        } else if (today.getTime() === lastLogin.getTime() + oneDay) {
+            jarebState.dailyStreak++;
+            const bonusCoins = jarebState.dailyStreak * COINS_PER_STREAK;
+            jarebState.coins += bonusCoins;
+            showToast(`Daily streak! Day ${jarebState.dailyStreak}. You earned a bonus of ${bonusCoins} coins! Total: ${jarebState.coins}`);
+        } else if (today.getTime() < lastLogin.getTime()) {
+             jarebState.dailyStreak = 1;
         }
 
         jarebState.lastLoginDate = today.toISOString();
@@ -80,15 +80,10 @@
         const css = `
             @keyframes fadeIn { from { opacity: 0; } }
             @keyframes modalPopIn { from { opacity: 0; transform: scale(.95); } to { opacity: 1; transform: scale(1); } }
-            @keyframes jareb-psychedelic-gradient {
+            @keyframes jareb-rainbow-text {
                 0% { background-position: 0% 50%; }
                 50% { background-position: 100% 50%; }
                 100% { background-position: 0% 50%; }
-            }
-            @keyframes animated-frost-blur {
-                0% { backdrop-filter: blur(2px) brightness(1.0); }
-                50% { backdrop-filter: blur(6px) brightness(1.2); }
-                100% { backdrop-filter: blur(2px) brightness(1.0); }
             }
 
             /* --- Shop Button & Toast --- */
@@ -222,7 +217,7 @@
                 opacity: 0.7;
                 cursor: not-allowed;
             }
-            .jareb-badge {
+            .jareb-custom-badge {
                 width: 20px;
                 height: 20px;
                 margin-left: 5px;
@@ -242,17 +237,187 @@
                 width: 100%;
                 margin-top: 10px;
             }
-
-            /* --- Custom Themes --- */
-            .jareb-crazy-theme {
-                background: linear-gradient(45deg, #ff00ff, #00ffff, #ff0000, #ffff00);
-                background-size: 400% 400%;
-                animation: jareb-psychedelic-gradient 10s ease infinite;
-                border-radius: 8px;
-                padding: 10px;
+            .jareb-rainbow-name {
+                background: linear-gradient(to right, #ff0000, #ff7f00, #ffff00, #00ff00, #0000ff, #4b0082, #9400d3);
+                background-clip: text;
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                background-size: 200% auto;
+                animation: jareb-rainbow-text 5s linear infinite;
+                display: inline-block;
+            }
+            .jareb-custom-theme-input-container {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                margin-top: 10px;
+            }
+            .jareb-custom-theme-input-container input {
+                flex-grow: 1;
             }
         `;
         GM_addStyle(css, 'jareb-shop-styles');
+        // Apply the saved theme on script load
+        if (jarebState.activeThemeName) {
+            applyTheme(jarebState.activeThemeName, jarebState.activeThemeUrl);
+        }
+    }
+
+    /**
+     * Applies a theme based on its name.
+     * @param {string} themeName The name of the theme to apply.
+     * @param {string} [themeUrl] Optional URL for a custom theme.
+     */
+    function applyTheme(themeName, themeUrl) {
+        // First, disable any currently active theme
+        disableTheme();
+
+        // Apply the new theme based on its name
+        switch (themeName) {
+            case 'Custom CSS Theme':
+                if (themeUrl) {
+                    applyCustomThemeFromUrl(themeUrl);
+                }
+                break;
+            case 'Minimalist Layout':
+                applyMinimalistLayout();
+                break;
+        }
+
+        // Update state and display
+        jarebState.activeThemeName = themeName;
+        jarebState.activeThemeUrl = themeUrl;
+        saveState();
+    }
+
+    /**
+     * Disables any currently active theme by removing its CSS.
+     */
+    function disableTheme() {
+        const customTheme = document.getElementById(CUSTOM_THEME_STYLE_ID);
+        if (customTheme) {
+            customTheme.remove();
+        }
+        const minimalistTheme = document.getElementById(MINIMALIST_THEME_STYLE_ID);
+        if (minimalistTheme) {
+            minimalistTheme.remove();
+        }
+
+        const appMount = document.getElementById('app-mount');
+        if (appMount) {
+             appMount.classList.remove(MINIMALIST_CLASS);
+        }
+
+        const toggleButton = document.getElementById(SIDEBAR_TOGGLE_BUTTON_ID);
+        if (toggleButton) {
+            toggleButton.remove();
+        }
+
+        jarebState.activeThemeName = null;
+        jarebState.activeThemeUrl = null;
+        saveState();
+        showToast('Theme disabled.');
+    }
+
+    /**
+     * Applies the specific CSS for the minimalist layout theme.
+     */
+    function applyMinimalistLayout() {
+        // Find the main app container
+        const appMount = document.getElementById('app-mount');
+        if (!appMount) {
+            showToast('Could not find Discord app container.');
+            return;
+        }
+
+        // Apply the CSS based on the new class
+        GM_addStyle(`
+            /* The CSS will only apply when the parent has our custom class */
+            .${MINIMALIST_CLASS} [class*="guilds_"] {
+                display: none !important;
+            }
+
+            .${MINIMALIST_CLASS} [class*="sidebar_"] {
+                display: none !important;
+            }
+
+            .${MINIMALIST_CLASS} [class*="chat_"] {
+                width: 100% !important;
+                left: 0 !important;
+                margin-left: 0 !important;
+            }
+
+            #${SIDEBAR_TOGGLE_BUTTON_ID} {
+                position: fixed;
+                top: 10px;
+                left: 10px;
+                background-color: rgba(0, 0, 0, 0.4);
+                color: white;
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 8px;
+                padding: 10px;
+                cursor: pointer;
+                font-family: sans-serif;
+                z-index: 1000;
+                transition: background-color 0.2s ease-in-out;
+            }
+            #${SIDEBAR_TOGGLE_BUTTON_ID}:hover {
+                background-color: rgba(0, 0, 0, 0.6);
+            }
+        `, MINIMALIST_THEME_STYLE_ID);
+
+        // Add the class to activate the CSS rules
+        appMount.classList.add(MINIMALIST_CLASS);
+
+        // Add the toggle button
+        let toggleButton = document.getElementById(SIDEBAR_TOGGLE_BUTTON_ID);
+        if (!toggleButton) {
+            toggleButton = document.createElement('button');
+            toggleButton.id = SIDEBAR_TOGGLE_BUTTON_ID;
+            toggleButton.textContent = 'Toggle Sidebars';
+            toggleButton.onclick = () => {
+                const appContainer = document.getElementById('app-mount');
+                if (appContainer) {
+                    appContainer.classList.toggle(MINIMALIST_CLASS);
+                }
+            };
+            document.body.appendChild(toggleButton);
+        }
+
+        showToast('Minimalist Layout applied!');
+    }
+
+    /**
+     * Applies a custom CSS theme from a URL.
+     * @param {string} url The URL of the CSS file.
+     */
+    function applyCustomThemeFromUrl(url) {
+        if (!url) {
+            disableTheme();
+            return;
+        }
+
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: url,
+            onload: function(response) {
+                if (response.status === 200) {
+                    GM_addStyle(response.responseText, CUSTOM_THEME_STYLE_ID);
+                    jarebState.activeThemeUrl = url;
+                    saveState();
+                    showToast('Custom theme applied successfully!');
+                } else {
+                    showToast(`Failed to load theme. Status: ${response.status}`);
+                    jarebState.activeThemeUrl = null;
+                    saveState();
+                }
+            },
+            onerror: function() {
+                showToast('Failed to load theme. Check the URL.');
+                jarebState.activeThemeUrl = null;
+                saveState();
+            }
+        });
     }
 
     // --- CORE LOGIC ---
@@ -317,24 +482,9 @@
     }
 
     /**
-     * Copies text to the clipboard.
-     * @param {string} text The text to copy.
-     */
-    function copyToClipboard(text) {
-        const el = document.createElement('textarea');
-        el.value = text;
-        document.body.appendChild(el);
-        el.select();
-        document.execCommand('copy');
-        document.body.removeChild(el);
-        showToast('Text copied to clipboard!');
-    }
-
-    /**
      * Injects the shop button into the Discord UI.
      */
     function injectShopButton() {
-        // Find a more stable parent element for the button, e.g., the panels wrapper
         const panels = document.querySelector('[class*="panels_"]');
         if (panels && !document.getElementById('jareb-shop-button')) {
             const button = document.createElement('button');
@@ -398,81 +548,105 @@
      */
     function displayShop(container) {
         container.innerHTML = '';
-        const shopItems = [
-            { name: "Rainbow Name", cost: 100, description: "Makes your username cycle through a rainbow of colors.", type: 'theme' },
-            { name: "Animated Status", cost: 250, description: "Adds a cool animation to your status message.", type: 'theme' },
-            { name: "Jareb Sound Effect", cost: 50, description: "Plays a fun sound effect every time you send a message.", type: 'theme' },
-            { name: "Crazy Profile Theme", cost: 500, description: "Unlocks a crazy, custom theme for your profile that others with the plugin can see.", type: 'theme' },
-            { name: "Shiny Star Badge", cost: 150, description: "Displays a shiny star next to your name on your profile pop-out.", type: 'badge', svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512" class="jareb-badge"><path fill="#ffcc00" d="M316.9 18C324.6 24.3 329.1 33.5 329.1 43.1v108c0 10.7 2.1 21.2 6.1 31.1l-60 148.9c-2.4 5.9-1.2 12.6 3 17.7s10.6 6.6 16.5 4.1l148.9-60c9.9 4 20.4 6.1 31.1 6.1H533c9.6 0 18.8-4.5 25.1-12.2s9.2-17.2 9.2-27.2l-21.6-129.5c-1.3-7.6-4.9-14.7-10.4-20.2s-12.6-9-20.2-10.4L337.3 18.9c-10-1.8-19.1 2.3-27.2 9.2zm-155.6 92.4l-118-47.2c-5.9-2.4-12.6-1.2-17.7 3s-6.6 10.6-4.1 16.5l47.2 118c2.1 5.2 3.1 10.9 3.1 16.7v97c0 10.7-2.1 21.2-6.1 31.1l-60 148.9c-2.4 5.9-1.2 12.6 3 17.7s10.6 6.6 16.5 4.1l148.9-60c9.9 4 20.4 6.1 31.1 6.1H490.9c9.6 0 18.8-4.5 25.1-12.2s9.2-17.2 9.2-27.2l-21.6-129.5c-1.3-7.6-4.9-14.7-10.4-20.2s-12.6-9-20.2-10.4L188 98.4z"/></svg>`},
-            { name: "Lightning Bolt Badge", cost: 200, description: "Displays a cool lightning bolt next to your name on your profile pop-out.", type: 'badge', svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" class="jareb-badge"><path fill="#5d8bcf" d="M152 48a24 24 0 0 1-20.6-11.8C126.1 27.2 115.3 16 102.7 16H24c-13.2 0-24 10.8-24 24s10.8 24 24 24H80.5L34.1 251.4c-4.3 22.9 8.2 46.1 30.1 54.3L192 365.1V288c0-13.2 10.8-24 24-24s24 10.8 24 24v50.2l76.2 30.5c23.2 9.3 49.3-2.6 59.6-25.8s-2.6-49.3-25.8-59.6L232 232V184a24 24 0 0 1 20.6-11.8C258 172.8 268.7 160 281.3 160h78.7c13.2 0 24-10.8 24-24s-10.8-24-24-24H281.3c-13.4 0-25.2 6.6-32.3 17.7l-94 141c-7.3 11-19.1 17.3-31.9 17.3H152V48zM192 488c0 13.2-10.8 24-24 24H24c-13.2 0-24-10.8-24-24s10.8-24 24-24h144c13.2 0 24 10.8 24 24z"/></svg>`},
-        ];
-
-        shopItems.forEach(item => {
+        Object.entries(ALL_SHOP_ITEMS).forEach(([name, item]) => {
             const itemElement = document.createElement('div');
             itemElement.classList.add('jareb-shop-item');
-            itemElement.dataset.itemName = item.name;
+            itemElement.dataset.itemName = name;
 
             const details = document.createElement('div');
             details.innerHTML = `
-                <h3 style="color: var(--header-primary); margin: 0; font-size: 16px;">${item.name}</h3>
+                <h3 style="color: var(--header-primary); margin: 0; font-size: 16px;">${name}</h3>
                 <p style="color: var(--text-muted); margin: 4px 0 0; font-size: 12px;">${item.description}</p>
                 <p style="color: var(--interactive-normal); margin: 4px 0 0; font-weight: bold;">Cost: ${item.cost} Jareb Coins</p>
             `;
 
-            const purchaseButton = document.createElement('button');
-            purchaseButton.classList.add('jareb-purchase-button');
+            const actionContainer = document.createElement('div');
+            actionContainer.style.display = 'flex';
+            actionContainer.style.gap = '8px';
 
-            const isUnlocked = item.type === 'theme' ? jarebState.unlockedThemes.includes(item.name) : jarebState.unlockedBadges.includes(item.name);
-            purchaseButton.textContent = isUnlocked ? 'Unlocked' : 'Buy';
-            purchaseButton.disabled = isUnlocked;
-
-            purchaseButton.onclick = () => {
-                if (deductCoins(item.cost)) {
-                    if (item.type === 'theme') {
-                        jarebState.unlockedThemes.push(item.name);
-                    } else if (item.type === 'badge') {
-                        jarebState.unlockedBadges.push(item.name);
-                    }
-                    saveState();
-                    updateShopItemUI(itemElement, item);
-                }
-            };
-
-            itemElement.appendChild(details);
-            itemElement.appendChild(purchaseButton);
-            container.appendChild(itemElement);
+            const isUnlocked = jarebState.unlockedThemes.includes(name);
 
             if (isUnlocked) {
-                updateShopItemUI(itemElement, item);
+                const applyButton = document.createElement('button');
+                applyButton.classList.add('jareb-purchase-button');
+                applyButton.textContent = 'Apply';
+                applyButton.disabled = jarebState.activeThemeName === name;
+                applyButton.onclick = () => {
+                    applyTheme(name);
+                    // Re-render the shop to update button states
+                    displayShop(container);
+                };
+                actionContainer.appendChild(applyButton);
+
+                const disableButton = document.createElement('button');
+                disableButton.classList.add('jareb-purchase-button');
+                disableButton.textContent = 'Disable';
+                disableButton.style.backgroundColor = 'var(--status-danger)';
+                disableButton.disabled = jarebState.activeThemeName !== name;
+                disableButton.onclick = () => {
+                    disableTheme();
+                    displayShop(container);
+                };
+                actionContainer.appendChild(disableButton);
+
+            } else {
+                const buyButton = document.createElement('button');
+                buyButton.classList.add('jareb-purchase-button');
+                buyButton.textContent = 'Buy';
+                buyButton.disabled = jarebState.coins < item.cost;
+                buyButton.onclick = () => {
+                    if (deductCoins(item.cost)) {
+                        jarebState.unlockedThemes.push(name);
+                        saveState();
+                        // Re-render the shop to show the new buttons
+                        displayShop(container);
+                    }
+                };
+                actionContainer.appendChild(buyButton);
+            }
+
+            itemElement.appendChild(details);
+            itemElement.appendChild(actionContainer);
+            container.appendChild(itemElement);
+
+            if (name === 'Custom CSS Theme' && isUnlocked) {
+                 updateCustomThemeUI(itemElement);
             }
         });
     }
 
     /**
-     * Updates a single shop item's state after a purchase.
+     * Updates the UI for the custom CSS theme item.
      * @param {HTMLElement} itemElement The item's parent container.
-     * @param {object} item The item object.
      */
-    function updateShopItemUI(itemElement, item) {
-        const purchaseButton = itemElement.querySelector('button');
-        if (purchaseButton) {
-            purchaseButton.textContent = 'Unlocked';
-            purchaseButton.disabled = true;
+    function updateCustomThemeUI(itemElement) {
+        const container = document.createElement('div');
+        container.innerHTML = `
+            <p style="color: var(--text-normal); margin-top: 10px;">
+                Enter the URL of a public CSS theme to apply it to Discord.
+            </p>
+            <div class="jareb-custom-theme-input-container">
+                <input type="text" id="custom-theme-url" class="jareb-input" placeholder="Enter theme URL...">
+                <button id="apply-custom-theme-url" class="jareb-purchase-button">Apply URL</button>
+            </div>
+        `;
+        const urlInput = container.querySelector('#custom-theme-url');
+        const applyButton = container.querySelector('#apply-custom-theme-url');
+
+        if (jarebState.activeThemeUrl) {
+            urlInput.value = jarebState.activeThemeUrl;
         }
 
-        if (item.type === 'theme' && item.name === 'Crazy Profile Theme') {
-            const copyMessage = document.createElement('div');
-            copyMessage.innerHTML = `
-                <p style="color: var(--text-normal); margin-top: 10px;">
-                    This theme is unlocked! To activate, paste the invisible text into your "About Me".
-                </p>
-                <button style="background-color: var(--brand-experiment); color: #fff; border: none; border-radius: 4px; padding: 8px 16px; cursor: pointer; margin-top: 10px;">
-                    Copy Invisible Text
-                </button>
-            `;
-            copyMessage.querySelector('button').onclick = () => copyToClipboard(INVISIBLE_KEY);
-            itemElement.appendChild(copyMessage);
-        }
+        applyButton.onclick = () => {
+            const url = urlInput.value;
+            if (url) {
+                applyTheme('Custom CSS Theme', url);
+            } else {
+                showToast('Please enter a valid URL.');
+            }
+        };
+
+        itemElement.appendChild(container);
     }
 
     /**
@@ -537,7 +711,7 @@
         };
 
         document.getElementById('dev-reset-all').onclick = () => {
-            jarebState = { coins: 0, unlockedThemes: [], unlockedBadges: [], dailyStreak: 0, lastLoginDate: null };
+            jarebState = { coins: 0, unlockedThemes: [], dailyStreak: 0, lastLoginDate: null, activeThemeUrl: null };
             saveState();
             updateCoinDisplay();
             showToast('All progress has been reset!');
@@ -556,53 +730,18 @@
     }
 
     /**
-     * Applies the "crazy" profile theme to the given profile node.
-     * @param {HTMLElement} profileNode The profile pop-out element.
+     * Observes the DOM for the "panels" element to ensure the shop button is injected at the right time.
      */
-    function applyCrazyTheme(profileNode) {
-        const userContainer = profileNode.querySelector('div[class*="userInfo"]');
-        if (!userContainer) return;
-        if (jarebState.unlockedThemes.includes('Crazy Profile Theme')) {
-            if (userContainer.classList.contains('jareb-crazy-theme')) {
-                return;
-            }
-            userContainer.classList.add('jareb-crazy-theme');
-        }
-    }
-
-    /**
-     * Applies the custom badges to the profile pop-out.
-     * @param {HTMLElement} profileNode The profile pop-out element.
-     */
-    function applyCustomBadges(profileNode) {
-        const badgeListContainer = profileNode.querySelector('div[class*="profileBadges"]');
-        if (!badgeListContainer) return;
-
-        if (badgeListContainer.querySelector('.jareb-badge-container')) {
-            return;
-        }
-
-        const customBadgesContainer = document.createElement('div');
-        customBadgesContainer.classList.add('jareb-badge-container');
-
-        const badges = {
-            'Shiny Star Badge': `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512" class="jareb-badge"><path fill="#ffcc00" d="M316.9 18C324.6 24.3 329.1 33.5 329.1 43.1v108c0 10.7 2.1 21.2 6.1 31.1l-60 148.9c-2.4 5.9-1.2 12.6 3 17.7s10.6 6.6 16.5 4.1l148.9-60c9.9 4 20.4 6.1 31.1 6.1H533c9.6 0 18.8-4.5 25.1-12.2s9.2-17.2 9.2-27.2l-21.6-129.5c-1.3-7.6-4.9-14.7-10.4-20.2s-12.6-9-20.2-10.4L337.3 18.9c-10-1.8-19.1 2.3-27.2 9.2zm-155.6 92.4l-118-47.2c-5.9-2.4-12.6-1.2-17.7 3s-6.6 10.6-4.1 16.5l47.2 118c2.1 5.2 3.1 10.9 3.1 16.7v97c0 10.7-2.1 21.2-6.1 31.1l-60 148.9c-2.4 5.9-1.2 12.6 3 17.7s10.6 6.6 16.5 4.1l148.9-60c9.9 4 20.4 6.1 31.1 6.1H490.9c9.6 0 18.8-4.5 25.1-12.2s9.2-17.2 9.2-27.2l-21.6-129.5c-1.3-7.6-4.9-14.7-10.4-20.2s-12.6-9-20.2-10.4L188 98.4z"/></svg>`,
-            'Lightning Bolt Badge': `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" class="jareb-badge"><path fill="#5d8bcf" d="M152 48a24 24 0 0 1-20.6-11.8C126.1 27.2 115.3 16 102.7 16H24c-13.2 0-24 10.8-24 24s10.8 24 24 24H80.5L34.1 251.4c-4.3 22.9 8.2 46.1 30.1 54.3L192 365.1V288c0-13.2 10.8-24 24-24s24 10.8 24 24v50.2l76.2 30.5c23.2 9.3 49.3-2.6 59.6-25.8s-2.6-49.3-25.8-59.6L232 232V184a24 24 0 0 1 20.6-11.8C258 172.8 268.7 160 281.3 160h78.7c13.2 0 24-10.8 24-24s-10.8-24-24-24H281.3c-13.4 0-25.2 6.6-32.3 17.7l-94 141c-7.3 11-19.1 17.3-31.9 17.3H152V48zM192 488c0 13.2-10.8 24-24 24H24c-13.2 0-24-10.8-24-24s10.8-24 24-24h144c13.2 0 24 10.8 24 24z"/></svg>`,
-        };
-
-        jarebState.unlockedBadges.forEach(badgeName => {
-            const svgCode = badges[badgeName];
-            if (svgCode) {
-                const badgeElement = document.createElement('div');
-                badgeElement.innerHTML = svgCode;
-                badgeElement.setAttribute('title', badgeName);
-                customBadgesContainer.appendChild(badgeElement);
+    function observeAndInject() {
+        const observer = new MutationObserver((mutations, obs) => {
+            const panels = document.querySelector('[class*="panels_"]');
+            if (panels) {
+                injectShopButton();
+                obs.disconnect(); // Stop observing once the element is found and button injected.
             }
         });
-
-        if (customBadgesContainer.childElementCount > 0) {
-            badgeListContainer.appendChild(customBadgesContainer);
-        }
+        // Start observing the body for changes
+        observer.observe(document.body, { childList: true, subtree: true });
     }
 
     /**
@@ -611,36 +750,12 @@
     function init() {
         applyStyles();
         checkDailyStreak(); // Check and update the streak on every page load.
-
-        // Observer for injecting the shop button
-        const buttonObserver = new MutationObserver(() => injectShopButton());
-        buttonObserver.observe(document.body, { childList: true, subtree: true });
-
-        // Observer for detecting and styling user profiles
-        const profileObserver = new MutationObserver(mutations => {
-            mutations.forEach(mutation => {
-                mutation.addedNodes.forEach(node => {
-                    if (node.nodeType === 1) {
-                        const profileModal = node.querySelector('div[role="dialog"][aria-label*="User Profile"]');
-                        if (profileModal) {
-                            const aboutMe = profileModal.querySelector('div[class*="aboutMeText"]');
-                            if (aboutMe && aboutMe.textContent.includes(INVISIBLE_KEY)) {
-                                applyCrazyTheme(profileModal);
-                            }
-                            applyCustomBadges(profileModal);
-                        }
-                    }
-                });
-            });
-        });
-        profileObserver.observe(document.body, { childList: true, subtree: true });
+        observeAndInject();
 
         // Start listening for messages to award coins
         const messageObserver = new MutationObserver(() => {
-            // Re-select the message box to ensure we have the latest element
             const messageBox = document.querySelector('div[role="textbox"]');
             if (messageBox) {
-                // Ensure the event listener is not added multiple times
                 if (!messageBox.jarebListenerAttached) {
                     messageBox.addEventListener('keydown', (e) => {
                         if (e.key === 'Enter' && !e.shiftKey && messageBox.textContent.trim().length > 0) {
@@ -655,13 +770,6 @@
             }
         });
         messageObserver.observe(document.body, { childList: true, subtree: true });
-
-        // Initial injection on page load
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', injectShopButton);
-        } else {
-            injectShopButton();
-        }
     }
 
     init();
