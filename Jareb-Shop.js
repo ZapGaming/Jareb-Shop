@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         The Jareb Shop (Tampermonkey System)
 // @namespace    http://tampermonkey.net/
-// @version      1.21
-// @description  A plugin for Discord to earn "Jareb coins" with Tampermonkey-based persistence and custom badges.
+// @version      1.24
+// @description  A plugin for Discord to earn "Jareb coins" with Tampermonkey-based persistence and custom badges. Now with a password-protected developer zone.
 // @author       Gemini
 // @match        https://discord.com/*
 // @grant        GM_addStyle
@@ -15,15 +15,20 @@
     'use strict';
 
     // --- CONFIGURATION & DEFAULTS ---
-    const COINS_PER_MESSAGE = 1;
-    const LOCAL_STORAGE_KEY = 'jarebShopState_v1_21';
+    const LOCAL_STORAGE_KEY = 'jarebShopState_v1_23';
     const INVISIBLE_KEY = 'jareb-theme-crazy\u200B';
+    const COINS_PER_STREAK = 10;
+    const COINS_PER_MESSAGE_BASE = 1;
+    const COINS_PER_50_CHARS = 1;
+    const DEV_ZONE_PASSWORD = 'heykidwantahotdog';
 
     // --- STATE MANAGEMENT ---
     let jarebState = GM_getValue(LOCAL_STORAGE_KEY, {
         coins: 0,
         unlockedThemes: [],
-        unlockedBadges: []
+        unlockedBadges: [],
+        dailyStreak: 0,
+        lastLoginDate: null,
     });
 
     /**
@@ -31,6 +36,43 @@
      */
     function saveState() {
         GM_setValue(LOCAL_STORAGE_KEY, jarebState);
+    }
+
+    /**
+     * Checks and updates the daily streak on script load.
+     */
+    function checkDailyStreak() {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); // Normalize to midnight for accurate comparison
+
+        const lastLogin = jarebState.lastLoginDate ? new Date(jarebState.lastLoginDate) : null;
+        const oneDay = 24 * 60 * 60 * 1000;
+
+        // If this is the first time, start the streak
+        if (!lastLogin) {
+            jarebState.dailyStreak = 1;
+            showToast('Welcome! Your daily streak has begun (Day 1).');
+        } else {
+            const timeDifference = today.getTime() - lastLogin.getTime();
+            // Check if login was yesterday
+            if (timeDifference > 0 && timeDifference <= oneDay) {
+                jarebState.dailyStreak++;
+                const bonusCoins = jarebState.dailyStreak * COINS_PER_STREAK;
+                jarebState.coins += bonusCoins;
+                showToast(`Daily streak! Day ${jarebState.dailyStreak}. You earned a bonus of ${bonusCoins} coins! Total: ${jarebState.coins}`);
+            } else if (timeDifference > oneDay) {
+                // Streak is broken
+                jarebState.dailyStreak = 1;
+                showToast('Your streak was broken. But you are back on track! (Day 1)');
+            } else {
+                // Logged in on the same day, do nothing.
+                return;
+            }
+        }
+
+        jarebState.lastLoginDate = today.toISOString();
+        saveState();
+        updateCoinDisplay();
     }
 
     // --- UI STYLES ---
@@ -191,6 +233,15 @@
                 gap: 5px;
                 margin-top: 10px;
             }
+            .jareb-input {
+                background-color: var(--background-secondary-alt);
+                border: 1px solid var(--background-modifier-accent);
+                border-radius: 4px;
+                color: var(--text-normal);
+                padding: 8px;
+                width: 100%;
+                margin-top: 10px;
+            }
 
             /* --- Custom Themes --- */
             .jareb-crazy-theme {
@@ -256,12 +307,12 @@
     }
 
     /**
-     * Updates the UI to show the current coin balance.
+     * Updates the UI to show the current coin balance and streak count.
      */
     function updateCoinDisplay() {
         const coinDisplay = document.getElementById('jareb-coins-display');
         if (coinDisplay) {
-            coinDisplay.textContent = `${jarebState.coins} Jareb Coins`;
+            coinDisplay.textContent = `${jarebState.coins} Jareb Coins (Streak: ${jarebState.dailyStreak})`;
         }
     }
 
@@ -314,7 +365,7 @@
                 <h2 class="jareb-title" style="margin: 0;">The Jareb Shop</h2>
                 <div class="jareb-tabs-container">
                     <button class="jareb-tab-button" data-tab="shop">Shop</button>
-                    <button class="jareb-tab-button" data-tab="settings">Settings</button>
+                    <button class="jareb-tab-button" data-tab="dev">Dev Zone</button>
                 </div>
             </div>
             <p id="jareb-coins-display" style="color: var(--text-normal); text-align: center; margin-bottom: 20px; font-size: 16px; font-weight: bold;"></p>
@@ -330,8 +381,8 @@
                 const contentArea = document.getElementById('jareb-shop-content-area');
                 if (tab === 'shop') {
                     displayShop(contentArea);
-                } else if (tab === 'settings') {
-                    displaySettings(contentArea);
+                } else if (tab === 'dev') {
+                    displayDevZone(contentArea);
                 }
             };
         });
@@ -425,27 +476,71 @@
     }
 
     /**
-     * Displays the settings content in the modal.
+     * Displays the developer zone content.
      * @param {HTMLElement} container The modal content container.
      */
-    function displaySettings(container) {
-        container.innerHTML = '';
-        const settingsContent = document.createElement('div');
-        settingsContent.innerHTML = `
-            <p style="color: var(--text-normal); font-size: 14px;">
-                Your data is saved locally to your Tampermonkey script storage. It will not persist across different browsers or devices.
-            </p>
-            <button id="jareb-reset-coins-button" style="background-color: var(--status-danger); color: #fff; border: none; border-radius: 4px; padding: 8px 16px; cursor: pointer; margin-top: 20px;">
-                Reset Jareb Coins
-            </button>
+    function displayDevZone(container) {
+        container.innerHTML = `
+            <p style="color: var(--text-normal); margin-bottom: 10px;">This is the developer zone. Please enter the password to continue.</p>
+            <input type="password" id="dev-password-input" class="jareb-input" placeholder="Enter password...">
+            <button id="dev-password-submit" class="jareb-purchase-button" style="margin-top: 10px; width: 100%;">Submit</button>
         `;
-        container.appendChild(settingsContent);
 
-        document.getElementById('jareb-reset-coins-button').onclick = () => {
-            jarebState = { coins: 0, unlockedThemes: [], unlockedBadges: [] };
+        const passwordInput = document.getElementById('dev-password-input');
+        const submitButton = document.getElementById('dev-password-submit');
+
+        submitButton.onclick = () => {
+            if (passwordInput.value === DEV_ZONE_PASSWORD) {
+                showDevTools(container);
+            } else {
+                showToast('Incorrect password!');
+                passwordInput.value = '';
+            }
+        };
+
+        passwordInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                submitButton.click();
+            }
+        });
+    }
+
+    /**
+     * Shows the developer tools after correct password entry.
+     * @param {HTMLElement} container The modal content container.
+     */
+    function showDevTools(container) {
+        container.innerHTML = `
+            <h3 style="color: var(--header-primary); margin-bottom: 10px;">Developer Tools</h3>
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+                <div style="display: flex; gap: 10px; align-items: flex-end;">
+                    <div style="flex-grow: 1;">
+                        <p style="color: var(--text-normal); margin-bottom: 4px;">Add Custom Coins:</p>
+                        <input type="number" id="dev-custom-coins-input" class="jareb-input" placeholder="Enter amount...">
+                    </div>
+                    <button id="dev-add-custom-coins" class="jareb-purchase-button" style="background-color: var(--status-positive); width: auto;">Add</button>
+                </div>
+                <button id="dev-reset-all" class="jareb-purchase-button" style="background-color: var(--status-danger); width: 100%;">Reset All Progress</button>
+            </div>
+        `;
+
+        const customCoinsInput = document.getElementById('dev-custom-coins-input');
+        const addCustomCoinsButton = document.getElementById('dev-add-custom-coins');
+
+        addCustomCoinsButton.onclick = () => {
+            const amount = parseInt(customCoinsInput.value, 10);
+            if (!isNaN(amount) && amount > 0) {
+                addCoins(amount);
+            } else {
+                showToast('Please enter a valid positive number!');
+            }
+        };
+
+        document.getElementById('dev-reset-all').onclick = () => {
+            jarebState = { coins: 0, unlockedThemes: [], unlockedBadges: [], dailyStreak: 0, lastLoginDate: null };
             saveState();
             updateCoinDisplay();
-            showToast('Jareb coins and unlocked items have been reset!');
+            showToast('All progress has been reset!');
             closeModal();
         };
     }
@@ -515,6 +610,7 @@
      */
     function init() {
         applyStyles();
+        checkDailyStreak(); // Check and update the streak on every page load.
 
         // Observer for injecting the shop button
         const buttonObserver = new MutationObserver(() => injectShopButton());
@@ -548,7 +644,10 @@
                 if (!messageBox.jarebListenerAttached) {
                     messageBox.addEventListener('keydown', (e) => {
                         if (e.key === 'Enter' && !e.shiftKey && messageBox.textContent.trim().length > 0) {
-                            addCoins(COINS_PER_MESSAGE);
+                            const messageLength = messageBox.textContent.trim().length;
+                            const bonusCoins = Math.floor(messageLength / 50) * COINS_PER_50_CHARS;
+                            const totalCoins = COINS_PER_MESSAGE_BASE + bonusCoins;
+                            addCoins(totalCoins);
                         }
                     });
                     messageBox.jarebListenerAttached = true;
@@ -564,6 +663,10 @@
             injectShopButton();
         }
     }
+
+    init();
+})();
+
 
     init();
 })();
