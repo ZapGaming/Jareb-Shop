@@ -1,34 +1,42 @@
 // ==UserScript==
 // @name        The Jareb Shop (Tampermonkey System)
 // @namespace   http://tampermonkey.net/
-// @version     1.49
-// @description A plugin for Discord to earn "Jareb coins" with Tampermonkey-based persistence and custom CSS theme support. This version fixes the minimalist layout's toggle button functionality.
+// @version     1.51
+// @description A plugin for Discord to earn "Jareb coins" with Tampermonkey-based persistence and custom CSS theme support. This version adds a new "Fantasy UI" theme.
 // @author      Gemini
 // @match       https://discord.com/*
 // @grant       GM_addStyle
 // @grant       GM_getValue
 // @grant       GM_setValue
 // @grant       GM_xmlhttpRequest
+// @run-at      document-idle
 // ==/UserScript==
 
 (function() {
     'use strict';
 
     // --- CONFIGURATION & DEFAULTS ---
-    const LOCAL_STORAGE_KEY = 'jarebShopState_v1_49';
+    const LOCAL_STORAGE_KEY = 'jarebShopState_v1_51';
     const COINS_PER_STREAK = 10;
     const COINS_PER_MESSAGE_BASE = 1;
     const COINS_PER_50_CHARS = 1;
     const DEV_ZONE_PASSWORD = 'heykidwantahotdog';
     const CUSTOM_THEME_STYLE_ID = 'jareb-custom-css-theme';
     const MINIMALIST_THEME_STYLE_ID = 'jareb-minimalist-theme-styles';
+    const TERMINAL_THEME_STYLE_ID = 'jareb-terminal-theme-styles';
+    const FANTASY_THEME_STYLE_ID = 'jareb-fantasy-theme-styles';
     const SIDEBAR_TOGGLE_BUTTON_ID = 'jareb-sidebar-toggle-button';
     const MINIMALIST_CLASS = 'jareb-minimalist-active';
+    const TERMINAL_CLASS = 'jareb-terminal-active';
+    const FANTASY_CLASS = 'jareb-fantasy-active';
+
 
     // Centralized data for shop items
     const THEMES = {
         'Custom CSS Theme': { cost: 500, description: "Unlocks the ability to apply any custom CSS theme from a URL to the entire Discord client.", type: 'theme' },
-        'Minimalist Layout': { cost: 100, description: "Hides the sidebars for a full-screen chat experience. Includes a toggle button to show them again.", type: 'theme' }
+        'Minimalist Layout': { cost: 100, description: "Hides the sidebars for a full-screen chat experience. Includes a toggle button to show them again.", type: 'theme' },
+        'Terminal UI': { cost: 250, description: "Changes Discord's UI to a classic, green-on-black terminal look.", type: 'theme'},
+        'Fantasy UI': { cost: 300, description: "Transforms Discord into a medieval-inspired parchment scroll with an old-world font.", type: 'theme'}
     };
     const ALL_SHOP_ITEMS = { ...THEMES };
 
@@ -282,6 +290,12 @@
             case 'Minimalist Layout':
                 applyMinimalistLayout();
                 break;
+            case 'Terminal UI':
+                applyTerminalLayout();
+                break;
+            case 'Fantasy UI':
+                applyFantasyLayout();
+                break;
         }
 
         // Update state and display
@@ -302,10 +316,20 @@
         if (minimalistTheme) {
             minimalistTheme.remove();
         }
+        const terminalTheme = document.getElementById(TERMINAL_THEME_STYLE_ID);
+        if (terminalTheme) {
+            terminalTheme.remove();
+        }
+        const fantasyTheme = document.getElementById(FANTASY_THEME_STYLE_ID);
+        if (fantasyTheme) {
+            fantasyTheme.remove();
+        }
 
         const appMount = document.getElementById('app-mount');
         if (appMount) {
              appMount.classList.remove(MINIMALIST_CLASS);
+             appMount.classList.remove(TERMINAL_CLASS);
+             appMount.classList.remove(FANTASY_CLASS);
         }
 
         const toggleButton = document.getElementById(SIDEBAR_TOGGLE_BUTTON_ID);
@@ -386,6 +410,189 @@
 
         showToast('Minimalist Layout applied!');
     }
+
+    /**
+     * Applies the specific CSS for the Terminal UI theme.
+     */
+    function applyTerminalLayout() {
+        const appMount = document.getElementById('app-mount');
+        if (!appMount) {
+            showToast('Could not find Discord app container.');
+            return;
+        }
+
+        GM_addStyle(`
+            /* General Terminal Style */
+            .${TERMINAL_CLASS} {
+                background-color: #000000 !important;
+                color: #00ff00 !important;
+                font-family: 'Courier New', Courier, monospace !important;
+            }
+
+            /* Main Panels */
+            .${TERMINAL_CLASS} [class*="base_"] {
+                background-color: #0d0d0d !important;
+                border: 1px solid #00ff00 !important;
+                border-radius: 0 !important;
+            }
+            .${TERMINAL_CLASS} [class*="base_"]:hover {
+                 background-color: #001a00 !important;
+            }
+
+            /* Server and Channel Lists */
+            .${TERMINAL_CLASS} [class*="guilds_"] {
+                background-color: #000000 !important;
+                border-right: 1px solid #00ff00 !important;
+            }
+            .${TERMINAL_CLASS} [class*="sidebar_"] {
+                background-color: #0a0a0a !important;
+                border-right: 1px solid #00ff00 !important;
+            }
+
+            /* Channel and User List items */
+            .${TERMINAL_CLASS} [class*="link_"] {
+                border-radius: 0 !important;
+                color: #00ff00 !important;
+            }
+            .${TERMINAL_CLASS} [class*="link_"]:hover {
+                background-color: #001a00 !important;
+            }
+
+            /* Chat area and messages */
+            .${TERMINAL_CLASS} [class*="chat_"] {
+                background-color: #000000 !important;
+            }
+            .${TERMINAL_CLASS} [class*="message_"] {
+                background-color: transparent !important;
+                color: #00ff00 !important;
+            }
+
+            /* Text Input field */
+            .${TERMINAL_CLASS} [class*="input_"] {
+                background-color: #000000 !important;
+                border: 1px solid #00ff00 !important;
+                border-radius: 0 !important;
+                color: #00ff00 !important;
+                box-shadow: 0 0 5px #00ff00 inset !important;
+            }
+            .${TERMINAL_CLASS} [class*="button_"] {
+                background-color: transparent !important;
+                border: 1px solid #00ff00 !important;
+                border-radius: 0 !important;
+                color: #00ff00 !important;
+            }
+            .${TERMINAL_CLASS} [class*="button_"]:hover {
+                background-color: #001a00 !important;
+            }
+
+            /* Headers and other text */
+            .${TERMINAL_CLASS} [class*="header_"], .${TERMINAL_CLASS} [class*="title_"] {
+                color: #00ff00 !important;
+            }
+
+            /* Remove shadows, glow, etc */
+            .${TERMINAL_CLASS} * {
+                box-shadow: none !important;
+                text-shadow: none !important;
+            }
+
+        `, TERMINAL_THEME_STYLE_ID);
+
+        appMount.classList.add(TERMINAL_CLASS);
+
+        showToast('Terminal UI applied!');
+    }
+
+    /**
+     * Applies the specific CSS for the Fantasy UI theme.
+     */
+    function applyFantasyLayout() {
+         const appMount = document.getElementById('app-mount');
+         if (!appMount) {
+             showToast('Could not find Discord app container.');
+             return;
+         }
+
+        // Custom font import (Google Fonts)
+        GM_addStyle(`
+            @import url('https://fonts.googleapis.com/css2?family=IM+Fell+English+SC&display=swap');
+        `);
+
+         GM_addStyle(`
+            /* General Fantasy Style */
+            .${FANTASY_CLASS} {
+                font-family: 'IM Fell English SC', serif !important;
+                color: #3e322b !important;
+                background-color: #a08a6f !important;
+            }
+
+            /* Background image and main container colors */
+            .${FANTASY_CLASS} [class*="app_"] {
+                background-image: url('https://placehold.co/100x100/a08a6f/5c4a3a?text=parchment');
+                background-repeat: repeat;
+                background-attachment: fixed;
+                background-color: #a08a6f !important;
+            }
+            .${FANTASY_CLASS} [class*="base_"] {
+                background-color: rgba(220, 200, 180, 0.8) !important;
+                border: 3px solid #5c4a3a !important;
+                border-radius: 10px;
+                box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
+            }
+
+            /* Scroll-like borders on panels */
+            .${FANTASY_CLASS} [class*="guilds_"],
+            .${FANTASY_CLASS} [class*="sidebar_"],
+            .${FANTASY_CLASS} [class*="chat_"] {
+                 background-color: rgba(220, 200, 180, 0.7) !important;
+                 border-image: url("https://placehold.co/10x10/886D4A/68513C?text=border") 30% round !important;
+                 border-width: 5px !important;
+                 border-style: solid !important;
+            }
+
+            /* Text and headers */
+            .${FANTASY_CLASS} [class*="header_"], .${FANTASY_CLASS} [class*="title_"] {
+                color: #5c4a3a !important;
+                text-shadow: 1px 1px 1px #a08a6f;
+            }
+            .${FANTASY_CLASS} [class*="link_"] {
+                color: #3e322b !important;
+            }
+            .${FANTASY_CLASS} [class*="link_"]:hover {
+                background-color: rgba(92, 74, 58, 0.1) !important;
+                border-radius: 5px;
+            }
+
+            /* Messages */
+            .${FANTASY_CLASS} [class*="message_"] {
+                background-color: transparent !important;
+                color: #3e322b !important;
+            }
+
+            /* Input field */
+            .${FANTASY_CLASS} [class*="input_"] {
+                background-color: rgba(220, 200, 180, 0.5) !important;
+                border: 1px solid #5c4a3a !important;
+                border-radius: 5px;
+                color: #3e322b !important;
+                box-shadow: inset 0 0 5px rgba(0,0,0,0.2) !important;
+            }
+            .${FANTASY_CLASS} [class*="button_"] {
+                background-color: #5c4a3a !important;
+                color: #e0d0b8 !important;
+                border: none !important;
+                border-radius: 5px !important;
+                box-shadow: 2px 2px 4px rgba(0,0,0,0.3) !important;
+            }
+            .${FANTASY_CLASS} [class*="button_"]:hover {
+                background-color: #3e322b !important;
+            }
+        `, FANTASY_THEME_STYLE_ID);
+
+        appMount.classList.add(FANTASY_CLASS);
+        showToast('Fantasy UI applied!');
+    }
+
 
     /**
      * Applies a custom CSS theme from a URL.
@@ -771,10 +978,6 @@
         });
         messageObserver.observe(document.body, { childList: true, subtree: true });
     }
-
-    init();
-})();
-
 
     init();
 })();
